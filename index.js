@@ -46,7 +46,7 @@ async function scrapeJobDetails(url) {
 // Function to scrape the latest job
 async function scrapeLatestJob() {
     try {
-        const { data } = await axios.get('https://freshershunt.in/');
+        const { data } = await axios.get('https://freshershunt.in/off-campus-drive/');
         const $ = cheerio.load(data);
 
         const link = $('.entry-title > a').first();
