@@ -4,104 +4,128 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const cron = require('node-cron');
 
-// Replace with your Telegram bot token
-
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-const jobUpdates = new Set(); // To store unique job updates
+// Store subscribers and tracked jobs
+const subscribers = new Set();
+const sentJobs = new Set();
 
-// Function to scrape job details
+// Improved scraping functions
 async function scrapeJobDetails(url) {
     try {
         const { data } = await axios.get(url);
         const $ = cheerio.load(data);
+        const jobDetails = {};
 
-        let jobDetails = '';
-
-        // Extract text from <p> tags
+        // Extract key-value pairs from paragraphs with strong tags
         $('p').each((index, element) => {
-            let extractedText = '';
-            $(element).contents().each((i, node) => {
-                if (node.type === 'text') {
-                    extractedText += $(node).text().trim() + ' '.trim();
-                }
-            });
-            jobDetails += extractedText.trim() + '\n';
+            const $element = $(element);
+            const strong = $element.find('strong');
+            if (strong.length) {
+                const key = strong.text().trim().replace(':', '');
+                const value = $element.contents().not(strong).text().trim();
+                if (key && value) jobDetails[key] = value;
+            }
         });
 
         // Extract apply link
-        const applyLink = $('.job-desc-content p strong a').attr('href');
-        if (applyLink) {
-            jobDetails += `Apply Link: ${applyLink}\n`.trim();
-        }
+        jobDetails['Apply Link'] = $('.job-desc-content p strong a').attr('href');
 
-        return jobDetails.trim();
+        return jobDetails;
     } catch (error) {
         console.error('Error scraping job details:', error);
         return null;
     }
 }
 
-// Function to scrape the latest job
 async function scrapeLatestJob() {
     try {
         const { data } = await axios.get('https://freshershunt.in/off-campus-drive/');
         const $ = cheerio.load(data);
 
-        const link = $('.entry-title > a').first();
-        if (link.length > 0) {
-            const text = link.text().trim();
-            const href = link.attr('href');
+        const jobElement = $('.entry-title > a').first();
+        if (jobElement.length === 0) return null;
 
-            const jobDetails = await scrapeJobDetails(href);
-            if (jobDetails) {
-                const jobUpdate = ` ${text}\n\nJob Details:\n\n${jobDetails}`;
-                return jobUpdate.trim();
-            }
-        }       
+        const title = jobElement.text().trim();
+        const url = jobElement.attr('href');
+        
+        // Skip already sent jobs
+        if (sentJobs.has(url)) return null;
+
+        const details = await scrapeJobDetails(url);
+        if (!details) return null;
+
+        return { title, url, details };
     } catch (error) {
         console.error('Error scraping latest job:', error);
-    }
-    return null;
-}
-
-// Function to send job updates to all users
-async function sendJobUpdates() {
-    const jobUpdate = await scrapeLatestJob();
-    if (jobUpdate && !jobUpdates.has(jobUpdate)) {
-        jobUpdates.add(jobUpdate);
-        bot.sendMessage(chatId, jobUpdate);
+        return null;
     }
 }
 
-// Greet user when they start the bot
+// Format message with Markdown
+function formatJobMessage(job) {
+    let message = `🔔 *New Job Alert!* 🔔\n\n`;
+    message += `*${job.title}*\n\n`;
+    message += `🏢 *Company:* ${job.details['Company Name'] || 'Not specified'}\n`;
+    message += `🎯 *Role:* ${job.details['Job Role'] || 'Not specified'}\n`;
+    message += `📍 *Location:* ${job.details['Job Location'] || 'Multiple Locations'}\n`;
+    message += `🎓 *Qualifications:* ${job.details['Qualifications'] || 'Any Graduate'}\n\n`;
+    message += `📝 *Key Details:*\n`;
+    message += `• Batch: ${job.details['Batch'] || 'Not specified'}\n`;
+    message += `• Experience: ${job.details['Experience'] || 'Freshers'}\n`;
+    message += `• Salary: ${job.details['Salary'] || 'Competitive'}\n\n`;
+    message += `🔗 *Apply Here:* [Click to Apply](${job.details['Apply Link']})\n`;
+
+    return message;
+}
+
+// Handle subscribers
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    bot.sendMessage(chatId, 'Welcome to the Job Updates Bot! Use /latest to get the latest job update.');
+    subscribers.add(chatId);
+    bot.sendMessage(
+        chatId,
+        '🌟 Welcome to Job Alerts Bot! 🌟\n\nWe\'ll send you new off-campus drive updates automatically. You can also use /latest to get the most recent job posting.',
+        { parse_mode: 'Markdown' }
+    );
 });
 
-// Provide the latest job when user uses /latest command
 bot.onText(/\/latest/, async (msg) => {
     const chatId = msg.chat.id;
-    const jobUpdate = await scrapeLatestJob();
-    if (jobUpdate) {
-        bot.sendMessage(chatId, jobUpdate);
+    const job = await scrapeLatestJob();
+    if (job) {
+        bot.sendMessage(chatId, formatJobMessage(job), { 
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true 
+        });
     } else {
-        bot.sendMessage(chatId, 'No job updates found.');
+        bot.sendMessage(chatId, 'No new job postings found at the moment. Check back later!');
     }
 });
 
-// Check for new job updates every minute
-cron.schedule('0 * * * *', async () => {
-    const jobUpdate = await scrapeLatestJob();
-    if (jobUpdate && !jobUpdates.has(jobUpdate)) {
-        jobUpdates.add(jobUpdate);
-        // Send the update to all users (you can store chat IDs in a database for this purpose)
-        // For now, it will only send to the last user who interacted with the bot
-        bot.sendMessage(chatId, jobUpdate);
+// Check for new jobs every 10 minutes
+cron.schedule('*/10 * * * *', async () => {
+    console.log('Checking for new jobs...');
+    const job = await scrapeLatestJob();
+    
+    if (job) {
+        sentJobs.add(job.url);
+        const message = formatJobMessage(job);
+        
+        subscribers.forEach(chatId => {
+            bot.sendMessage(chatId, message, {
+                parse_mode: 'Markdown',
+                disable_web_page_preview: true
+            }).catch(error => {
+                console.error(`Error sending to ${chatId}:`, error);
+                // Remove invalid subscribers
+                if (error.response?.statusCode === 403) {
+                    subscribers.delete(chatId);
+                }
+            });
+        });
     }
 });
 
-// Start the bot
-console.log('Job Updates Bot is running...');
+console.log('🤖 Job Alerts Bot is running...');
