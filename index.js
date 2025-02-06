@@ -105,7 +105,7 @@ bot.onText(/\/latest/, async (msg) => {
 });
 
 // Check for new jobs every 10 minutes
-cron.schedule('*/10 * * * *', async () => {
+cron.schedule('*/60 * * * *', async () => {
     console.log('Checking for new jobs...');
     const job = await scrapeLatestJob();
     
