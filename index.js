@@ -8,6 +8,8 @@ const fs = require('fs').promises;
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
+const channelId = '@EngineeringJobUpdates';
+
 // Persistent storage setup
 const SENT_JOBS_FILE = 'sentJobs.json';
 const subscribers = new Set();
@@ -27,19 +29,16 @@ const sentJobs = new Set();
   }
 })();
 
-// URL normalization function: Removes query parameters, hash, and trailing slash
 function normalizeUrl(url) {
   return url ? url.split('?')[0].split('#')[0].replace(/\/$/, '') : '';
 }
 
-// Function to scrape job details from a given URL
 async function scrapeJobDetails(url) {
   try {
     const { data } = await axios.get(url);
     const $ = cheerio.load(data);
     const jobDetails = {};
 
-    // Extract key-value pairs from paragraph elements
     $('p').each((index, element) => {
       const $element = $(element);
       const strong = $element.find('strong');
@@ -50,7 +49,6 @@ async function scrapeJobDetails(url) {
       }
     });
 
-    // Extract specific information (Apply Link and Company Name)
     jobDetails['Apply Link'] = $('p').filter((i, el) =>
       $(el).find('strong').first().text().trim().toLowerCase().includes('apply link')
     ).find('a').attr('href');
@@ -58,7 +56,7 @@ async function scrapeJobDetails(url) {
     jobDetails['Company Name'] = $('p').filter((i, el) =>
       $(el).find('strong').first().text().trim().toLowerCase().includes('company website')
     ).find('a').text().trim();
-    
+
     return jobDetails;
   } catch (error) {
     console.error('Error scraping job details:', error);
@@ -66,13 +64,11 @@ async function scrapeJobDetails(url) {
   }
 }
 
-// Function to scrape the latest job posting from the target website
 async function scrapeLatestJob() {
   try {
     const { data } = await axios.get('https://freshershunt.in/off-campus-drive/');
     const $ = cheerio.load(data);
 
-    // Get the first job element from the list
     const jobElement = $('.entry-title > a').first();
     if (!jobElement.length) return null;
 
@@ -80,7 +76,6 @@ async function scrapeLatestJob() {
     const rawUrl = jobElement.attr('href');
     const url = normalizeUrl(rawUrl);
 
-    // Scrape detailed job information
     const details = await scrapeJobDetails(rawUrl);
     return details ? { title, url, details } : null;
   } catch (error) {
@@ -89,7 +84,6 @@ async function scrapeLatestJob() {
   }
 }
 
-// Function to format the job message with Markdown
 function formatJobMessage(job) {
   return `🔔 *New Job Alert!* 🔔\n\n` +
     `*${job.title}*\n\n` +
@@ -104,18 +98,16 @@ function formatJobMessage(job) {
     `🔗 *Apply Here:* [Click to Apply](${job.details['Apply Link']})\n`;
 }
 
-// Bot command: /start registers the user for job alerts.
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   subscribers.add(chatId);
   bot.sendMessage(
     chatId,
-    '🌟 Welcome to Job Alerts Bot! 🌟\n\nWe\'ll send you new off-campus drive updates every half hour. Use /latest to get the most recent job posting.',
+    '🌟 Welcome to Job Alerts Bot! 🌟\n\nWe\'ll send you new off-campus drive updates when new updates available. Use /latest to get the most recent job posting.',
     { parse_mode: 'Markdown' }
   );
 });
 
-// Bot command: /latest sends the most recent job posting immediately.
 bot.onText(/\/latest/, async (msg) => {
   const chatId = msg.chat.id;
   const job = await scrapeLatestJob();
@@ -126,28 +118,25 @@ bot.onText(/\/latest/, async (msg) => {
   }
 });
 
-// Cron job: Runs every 30 minutes to check for new job postings and sends them to all subscribers if not already sent
 cron.schedule('*/30 * * * *', async () => {
   console.log('Checking for new jobs...');
   try {
     const job = await scrapeLatestJob();
-    if (!job || sentJobs.has(job.url)) {
-      return;
-    }
+    if (!job || sentJobs.has(job.url)) return;
 
-    // Prevent duplicate notifications
     sentJobs.add(job.url);
     await fs.writeFile(SENT_JOBS_FILE, JSON.stringify([...sentJobs]));
 
     const message = formatJobMessage(job);
+
     subscribers.forEach(chatId => {
       bot.sendMessage(chatId, message, { parse_mode: 'Markdown', disable_web_page_preview: true })
-        .catch(error => {
-          if (error.response && error.response.statusCode === 403) {
-            subscribers.delete(chatId);
-          }
-        });
+        .catch(error => error.response?.statusCode === 403 && subscribers.delete(chatId));
     });
+
+    // ✅ Also post to the channel
+    bot.sendMessage(channelId, message, { parse_mode: 'Markdown', disable_web_page_preview: true });
+
   } catch (error) {
     console.error('Error in cron job:', error);
   }
