@@ -49,9 +49,13 @@ async function scrapeJobDetails(url) {
     });
 
     // Extract apply link
-    jobDetails['Apply Link'] = $('p:nth-child(23) > a').attr('href');
-    jobDetails['Company Name'] = $('p:nth-child(7) > strong > a').text().trim();
-
+    jobDetails['Apply Link'] = $('p').filter((i, el) =>
+      $(el).find('strong').first().text().trim().toLowerCase().includes('apply link')
+    ).find('a').attr('href');
+    jobDetails['Company Name'] = $('p').filter((i, el) =>
+      $(el).find('strong').first().text().trim().toLowerCase().includes('company website')
+    ).find('a').text().trim();
+    
     return jobDetails;
   } catch (error) {
     console.error('Error scraping job details:', error);
