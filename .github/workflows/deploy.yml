@@ -1,34 +1,27 @@
 name: Deploy to Azure VM
 
-on: [push]
+on:
+  push:
+    branches: [ main ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - name: Set up SSH private key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.AZURE_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          echo "" >> ~/.ssh/id_rsa                # ensure trailing newline
-          apt-get update && apt-get install -y dos2unix
-          dos2unix ~/.ssh/id_rsa                  # normalize line endings
-          ssh-keygen -p -f ~/.ssh/id_rsa -m pem -N ""  # convert to PEM if needed
-
-      - uses: webfactory/ssh-agent@v0.7.4
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0      # ← major-version alias
         with:
           ssh-private-key: ${{ secrets.AZURE_SSH_PRIVATE_KEY }}
 
-      - name: Add VM to known hosts
+      - name: Add Azure VM to known_hosts
         run: ssh-keyscan -H ${{ secrets.AZURE_VM_IP }} >> ~/.ssh/known_hosts
 
-      - name: Deploy and run
+      - name: Deploy and run Node.js
         run: |
           ssh ${{ secrets.AZURE_VM_USER }}@${{ secrets.AZURE_VM_IP }} << 'EOF'
-            cd /opt/apps/my-node-app   # adjust to your separate folder
+            cd /opt/apps/my-node-app
             git pull origin main
             npm install
             node index.js
