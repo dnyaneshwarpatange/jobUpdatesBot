@@ -1,51 +1,34 @@
-name: Deploy Node.js to Azure VM
+trigger:
+- main  # Trigger pipeline on changes to main branch
 
-on:
-  push:
-    branches: [ main ]
+pool:
+  vmImage: 'ubuntu-latest'  # Use Microsoft-hosted agent
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+variables:
+  VM_TARGET_FOLDER: '/home/azureuser/app'  # Target directory on VM
+  SSH_ENDPOINT: 'AzureVM_SSH_Connection'   # Name of your SSH service connection
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4                                      # latest checkout
+steps:
+- checkout: self  # Checkout source code to agent
 
-      - name: Validate SSH key formatting
-        run: |
-          echo "=== SSH Key Head ==="
-          echo "${{ secrets.SSH_KEY }}" | head -n2
-        # remove or comment out this step once formatting is confirmed
+- task: CopyFilesOverSSH@0
+  displayName: 'Copy files to Azure VM'
+  inputs:
+    sshEndpoint: $(SSH_ENDPOINT)
+    sourceFolder: '$(System.DefaultWorkingDirectory)'
+    contents: '**'  # Copy all files
+    targetFolder: $(VM_TARGET_FOLDER)
+    readyTimeout: 20000  # 20 second timeout
 
-      - name: Archive application
-        run: |
-          mkdir -p ../artifact
-          rm -f ../artifact/app.tar.gz
-          tar czf ../artifact/app.tar.gz \
-            --exclude-vcs \
-            --warning=no-file-changed \
-            -C $GITHUB_WORKSPACE .
-
-      - name: Copy to Azure VM via SCP
-        uses: appleboy/scp-action@v1                                    # fixed v1 action :contentReference[oaicite:8]{index=8}
-        with:
-          host:     ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key:      ${{ secrets.SSH_KEY }}
-          port:     ${{ secrets.SSH_PORT }}
-          source:   "../artifact/app.tar.gz"
-          target:   "~/app/"
-
-      - name: SSH and run deployment commands
-        uses: appleboy/ssh-action@v1
-        with:
-          host:     ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key:      ${{ secrets.SSH_KEY }}
-          port:     ${{ secrets.SSH_PORT }}
-          script: |
-            cd ~/app
-            tar xzf app.tar.gz
-            npm install --production
-            pm2 restart index.js --name my-app || pm2 start index.js --name my-app
+- task: SSH@0
+  displayName: 'Install dependencies and start application'
+  inputs:
+    sshEndpoint: $(SSH_ENDPOINT)
+    runOptions: commands
+    commands: |
+      cd $(VM_TARGET_FOLDER)
+      npm install --production
+      pm2 start index.js --name "my-app"
+      pm2 save
+      pm2 startup
+    failOnStdErr: false
