@@ -1,15 +1,35 @@
-- name: Install dependencies
-  run: npm install
+name: Deploy to Azure VM and Run Node.js
 
-# Remove this block:
-# - name: Build React App
-#   run: npm run build
+on:
+  push:
+    branches:
+      - main  # or the branch you want to trigger on
 
-- name: Copy Files to Azure VM
-  uses: appleboy/scp-action@v0.1.7
-  with:
-    host: ${{ secrets.AZURE_VM_IP }}
-    username: ${{ secrets.AZURE_VM_USER }}
-    key: ${{ secrets.SSH_PRIVATE_KEY }}
-    source: "."            # send all project files
-    target: "/home/azureuser/app"  # set your desired folder
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AZURE_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+        env:
+          AZURE_SSH_PRIVATE_KEY: ${{ secrets.AZURE_SSH_PRIVATE_KEY }}
+
+      - name: Add Azure VM IP to known hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.AZURE_VM_IP }} >> ~/.ssh/known_hosts
+
+      - name: Install Node.js on Azure VM and Run `index.js`
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.AZURE_VM_USER }}@${{ secrets.AZURE_VM_IP }} << 'EOF'
+            cd /path/to/your/project  # Make sure this path points to where your project is located
+            git pull origin main  # If you want to pull the latest code
+            npm install  # Install dependencies
+            node index.js  # Run your Node.js script
+          EOF
