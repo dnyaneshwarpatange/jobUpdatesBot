@@ -1,36 +1,46 @@
-name: Deploy to Azure VM
+name: Deploy Node.js app to Azure VM
 
-on: [push]
+# trigger on pushes to main branch
+on:
+  push:
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+    # 1) fetch your code
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Write SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.AZURE_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          echo "" >> ~/.ssh/id_rsa           # ensure trailing newline
-          apt-get update && apt-get install -y dos2unix
-          dos2unix ~/.ssh/id_rsa             # normalize LF endings
-          ssh-keygen -p -f ~/.ssh/id_rsa -m pem -N ""  # convert to PEM if needed
+    # 2) bundle everything up
+    - name: Archive code
+      run: tar czf release.tar.gz .
 
-      - uses: webfactory/ssh-agent@v0      # valid tag alias
-        with:
-          ssh-private-key: ${{ secrets.AZURE_SSH_PRIVATE_KEY }}
+    # 3) copy the archive to your VM
+    - name: Copy to Azure VM
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.AZURE_VM_HOST }}
+        username: ${{ secrets.AZURE_VM_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        source: "release.tar.gz"
+        target: "~/app/"
 
-      - name: Add VM to known hosts
-        run: ssh-keyscan -H ${{ secrets.AZURE_VM_IP }} >> ~/.ssh/known_hosts
-
-      - name: Deploy and run
-        run: |
-          ssh ${{ secrets.AZURE_VM_USER }}@${{ secrets.AZURE_VM_IP }} << 'EOF'
-            cd /opt/apps/my-node-app        # your actual VM folder
-            git pull origin main
-            npm install
-            node index.js
-          EOF
+    # 4) SSH in, unpack, install & restart
+    - name: SSH and deploy
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.AZURE_VM_HOST }}
+        username: ${{ secrets.AZURE_VM_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          cd ~/app
+          tar xzf release.tar.gz
+          npm install --production
+          # run under PM2 (install pm2 globally once on VM!)
+          pm2 restart index.js --name my-app || pm2 start index.js --name my-app
