@@ -1,22 +1,49 @@
-    - name: Set up SSH key
-      run: |
-        mkdir -p ~/.ssh
-        # write the private key
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        # auto-add the host to known_hosts (avoids prompt)
-        ssh-keyscan -p ${{ secrets.SSH_PORT || 22 }} ${{ secrets.AZURE_VM_HOST }} >> ~/.ssh/known_hosts
+name: Deploy Node.js app to Azure VM
 
-    - name: Copy artifact to Azure VM
-      run: |
-        scp -P ${{ secrets.SSH_PORT || 22 }} ../artifact/release.tar.gz \
-            ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_HOST }}:~/app/
+on:
+  push:
+    branches:
+      - main
 
-    - name: SSH and deploy
-      run: |
-        ssh -p ${{ secrets.SSH_PORT || 22 }} ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_HOST }} << 'EOF'
-          cd ~/app
-          tar xzf release.tar.gz
-          npm install --production
-          pm2 restart index.js --name my-app || pm2 start index.js --name my-app
-        EOF
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Archive code
+        run: |
+          # remove any stale archive
+          rm -f release.tar.gz
+
+          # build new tar, exclude .git and itself, ignore file-changed warnings
+          tar czf release.tar.gz \
+            --exclude='.git' \
+            --exclude='release.tar.gz' \
+            --warning=no-file-changed \
+            .
+      
+      - name: Copy to Azure VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "release.tar.gz"
+          target: "~/app/"
+
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd ~/app
+            tar xzf release.tar.gz
+            npm install --production
+            pm2 restart index.js --name my-app || pm2 start index.js --name my-app
