@@ -2,48 +2,43 @@ name: Deploy Node.js app to Azure VM
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - uses: actions/checkout@v3                                      # fetch code :contentReference[oaicite:6]{index=6}
 
-      - name: Archive code
-        run: |
-          # remove any stale archive
-          rm -f release.tar.gz
+    - name: Archive code outside workspace
+      run: |
+        mkdir -p ../artifact
+        rm -f ../artifact/release.tar.gz
+        tar czf ../artifact/release.tar.gz \
+          --exclude-vcs \
+          --warning=no-file-changed \
+          -C $GITHUB_WORKSPACE .
 
-          # build new tar, exclude .git and itself, ignore file-changed warnings
-          tar czf release.tar.gz \
-            --exclude='.git' \
-            --exclude='release.tar.gz' \
-            --warning=no-file-changed \
-            .
-      
-      - name: Copy to Azure VM
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.AZURE_VM_HOST }}
-          username: ${{ secrets.AZURE_VM_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          source: "release.tar.gz"
-          target: "~/app/"
+    - name: Copy to Azure VM
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.AZURE_VM_HOST }}
+        username: ${{ secrets.AZURE_VM_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        source: "../artifact/release.tar.gz"
+        target: "~/app/"
 
-      - name: SSH and deploy
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.AZURE_VM_HOST }}
-          username: ${{ secrets.AZURE_VM_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          script: |
-            cd ~/app
-            tar xzf release.tar.gz
-            npm install --production
-            pm2 restart index.js --name my-app || pm2 start index.js --name my-app
+    - name: SSH and deploy
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.AZURE_VM_HOST }}
+        username: ${{ secrets.AZURE_VM_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          cd ~/app
+          tar xzf release.tar.gz
+          npm install --production
+          pm2 restart index.js --name my-app || pm2 start index.js --name my-app
