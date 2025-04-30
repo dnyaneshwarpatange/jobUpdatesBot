@@ -1,4 +1,4 @@
-name: Deploy to Azure VM
+name: Deploy Node.js to Azure VM
 
 on:
   push:
@@ -10,29 +10,32 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3                              # use latest checkout :contentReference[oaicite:4]{index=4}
+        uses: actions/checkout@v4                                    # latest checkout :contentReference[oaicite:6]{index=6}
 
-      - name: Create archive
+      - name: Validate SSH key secret
+        run: |
+          echo "First line of key:"
+          echo "${{ secrets.SSH_KEY }}" | head -n1
+        # just to surface formatting; remove in prod
+
+      - name: Archive application
         run: |
           mkdir -p ../artifact
           rm -f ../artifact/app.tar.gz
-          tar czf ../artifact/app.tar.gz \
-            --exclude-vcs \
-            --warning=no-file-changed \
-            -C $GITHUB_WORKSPACE .
+          tar czf ../artifact/app.tar.gz --exclude-vcs --warning=no-file-changed -C $GITHUB_WORKSPACE .
 
-      - name: Copy to Azure VM via appleboy/scp-action
-        uses: appleboy/scp-action@v0.1.10                      # upgrade to fixed version :contentReference[oaicite:5]{index=5}
+      - name: Copy to Azure VM via SCP
+        uses: appleboy/scp-action@v1                                # use v1 release :contentReference[oaicite:7]{index=7}
         with:
-          host:     ${{ secrets.SSH_HOST }}                    # must be under with:, not env: :contentReference[oaicite:6]{index=6}
+          host:     ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key:      ${{ secrets.SSH_KEY }}
           port:     ${{ secrets.SSH_PORT }}
           source:   "../artifact/app.tar.gz"
           target:   "~/app/"
 
-      - name: SSH and deploy via appleboy/ssh-action
-        uses: appleboy/ssh-action@v0.1.10
+      - name: SSH and run deployment commands
+        uses: appleboy/ssh-action@v1
         with:
           host:     ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
