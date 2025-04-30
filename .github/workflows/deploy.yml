@@ -1,22 +1,45 @@
-    - name: Set up SSH key
-      run: |
-        mkdir -p ~/.ssh
-        # write the private key
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        # auto-add the host to known_hosts (avoids prompt)
-        ssh-keyscan -p ${{ secrets.SSH_PORT || 22 }} ${{ secrets.AZURE_VM_HOST }} >> ~/.ssh/known_hosts
+name: Deploy to Azure VM
 
-    - name: Copy artifact to Azure VM
-      run: |
-        scp -P ${{ secrets.SSH_PORT || 22 }} ../artifact/release.tar.gz \
-            ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_HOST }}:~/app/
+on:
+  push:
+    branches: [ main ]
 
-    - name: SSH and deploy
-      run: |
-        ssh -p ${{ secrets.SSH_PORT || 22 }} ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_HOST }} << 'EOF'
-          cd ~/app
-          tar xzf release.tar.gz
-          npm install --production
-          pm2 restart index.js --name my-app || pm2 start index.js --name my-app
-        EOF
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3                              # use latest checkout :contentReference[oaicite:4]{index=4}
+
+      - name: Create archive
+        run: |
+          mkdir -p ../artifact
+          rm -f ../artifact/app.tar.gz
+          tar czf ../artifact/app.tar.gz \
+            --exclude-vcs \
+            --warning=no-file-changed \
+            -C $GITHUB_WORKSPACE .
+
+      - name: Copy to Azure VM via appleboy/scp-action
+        uses: appleboy/scp-action@v0.1.10                      # upgrade to fixed version :contentReference[oaicite:5]{index=5}
+        with:
+          host:     ${{ secrets.SSH_HOST }}                    # must be under with:, not env: :contentReference[oaicite:6]{index=6}
+          username: ${{ secrets.SSH_USER }}
+          key:      ${{ secrets.SSH_KEY }}
+          port:     ${{ secrets.SSH_PORT }}
+          source:   "../artifact/app.tar.gz"
+          target:   "~/app/"
+
+      - name: SSH and deploy via appleboy/ssh-action
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host:     ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key:      ${{ secrets.SSH_KEY }}
+          port:     ${{ secrets.SSH_PORT }}
+          script: |
+            cd ~/app
+            tar xzf app.tar.gz
+            npm install --production
+            pm2 restart index.js --name my-app || pm2 start index.js --name my-app
