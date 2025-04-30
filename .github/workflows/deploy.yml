@@ -1,6 +1,5 @@
 name: Deploy Node.js app to Azure VM
 
-# trigger on pushes to main branch
 on:
   push:
     branches:
@@ -11,36 +10,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1) fetch your code
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    # 2) bundle everything up
-    - name: Archive code
-      run: tar czf release.tar.gz .
+      - name: Archive code
+        run: |
+          # remove any stale archive
+          rm -f release.tar.gz
 
-    # 3) copy the archive to your VM
-    - name: Copy to Azure VM
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.AZURE_VM_HOST }}
-        username: ${{ secrets.AZURE_VM_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ secrets.SSH_PORT || 22 }}
-        source: "release.tar.gz"
-        target: "~/app/"
+          # build new tar, exclude .git and itself, ignore file-changed warnings
+          tar czf release.tar.gz \
+            --exclude='.git' \
+            --exclude='release.tar.gz' \
+            --warning=no-file-changed \
+            .
+      
+      - name: Copy to Azure VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "release.tar.gz"
+          target: "~/app/"
 
-    # 4) SSH in, unpack, install & restart
-    - name: SSH and deploy
-      uses: appleboy/ssh-action@v0.1.7
-      with:
-        host: ${{ secrets.AZURE_VM_HOST }}
-        username: ${{ secrets.AZURE_VM_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ secrets.SSH_PORT || 22 }}
-        script: |
-          cd ~/app
-          tar xzf release.tar.gz
-          npm install --production
-          # run under PM2 (install pm2 globally once on VM!)
-          pm2 restart index.js --name my-app || pm2 start index.js --name my-app
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd ~/app
+            tar xzf release.tar.gz
+            npm install --production
+            pm2 restart index.js --name my-app || pm2 start index.js --name my-app
