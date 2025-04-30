@@ -1,42 +1,15 @@
-name: Deploy React App to Azure VM
+- name: Install dependencies
+  run: npm install
 
-on:
-  push:
-    branches: [main] # or your deployment branch
+# Remove this block:
+# - name: Build React App
+#   run: npm run build
 
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-
-    - name: Install dependencies
-      run: npm install
-
-    - name: Build React app
-      run: npm run build
-
-    - name: Deploy to Azure VM
-      uses: appleboy/scp-action@master
-      with:
-        host: ${{ secrets.AZURE_VM_IP }}
-        username: ${{ secrets.AZURE_VM_USER }}
-        key: ${{ secrets.AZURE_VM_SSH_KEY }}
-        source: "build/*"
-        target: "/home/youruser/react-app"
-
-    - name: Run SSH commands on Azure VM
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.AZURE_VM_IP }}
-        username: ${{ secrets.AZURE_VM_USER }}
-        key: ${{ secrets.AZURE_VM_SSH_KEY }}
-        script: |
-          sudo systemctl restart nginx # or pm2 restart if you use it
+- name: Copy Files to Azure VM
+  uses: appleboy/scp-action@v0.1.7
+  with:
+    host: ${{ secrets.AZURE_VM_IP }}
+    username: ${{ secrets.AZURE_VM_USER }}
+    key: ${{ secrets.SSH_PRIVATE_KEY }}
+    source: "."            # send all project files
+    target: "/home/azureuser/app"  # set your desired folder
