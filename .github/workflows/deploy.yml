@@ -10,22 +10,25 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4                                    # latest checkout :contentReference[oaicite:6]{index=6}
+        uses: actions/checkout@v4                                      # latest checkout
 
-      - name: Validate SSH key secret
+      - name: Validate SSH key formatting
         run: |
-          echo "First line of key:"
-          echo "${{ secrets.SSH_KEY }}" | head -n1
-        # just to surface formatting; remove in prod
+          echo "=== SSH Key Head ==="
+          echo "${{ secrets.SSH_KEY }}" | head -n2
+        # remove or comment out this step once formatting is confirmed
 
       - name: Archive application
         run: |
           mkdir -p ../artifact
           rm -f ../artifact/app.tar.gz
-          tar czf ../artifact/app.tar.gz --exclude-vcs --warning=no-file-changed -C $GITHUB_WORKSPACE .
+          tar czf ../artifact/app.tar.gz \
+            --exclude-vcs \
+            --warning=no-file-changed \
+            -C $GITHUB_WORKSPACE .
 
       - name: Copy to Azure VM via SCP
-        uses: appleboy/scp-action@v1                                # use v1 release :contentReference[oaicite:7]{index=7}
+        uses: appleboy/scp-action@v1                                    # fixed v1 action :contentReference[oaicite:8]{index=8}
         with:
           host:     ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
