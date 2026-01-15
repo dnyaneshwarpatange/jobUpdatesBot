@@ -1,5 +1,4 @@
-name: CI/CD Pipeline
-
+name: Deploy Bot
 on:
   push:
     branches: [ main ]
@@ -8,33 +7,58 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Deploy to Server via SSH
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # Navigate to app directory (create if not exists)
-            mkdir -p ~/jobUpdatesBot
-            cd ~/jobUpdatesBot
+            cd ~
             
-            # Pull latest changes (assuming you've cloned the repo there)
+            # --- SELF-HEALING SECTION ---
+            # If folder exists BUT it is not a Git repo (missing .git), it is broken.
+            # We delete it so we can start fresh.
+            if [ -d "jobUpdatesBot" ] && [ ! -d "jobUpdatesBot/.git" ]; then
+              echo "⚠️ Detected broken folder. Deleting to fix..."
+              rm -rf jobUpdatesBot
+            fi
+            # ---------------------------
+
+            # 1. Clone if missing
+            if [ ! -d "jobUpdatesBot" ]; then
+              echo "⬇️ Cloning repository..."
+              git clone https://github.com/dnyaneshwarpatange/jobUpdatesBot.git
+            fi
+
+            # 2. Enter folder
+            cd jobUpdatesBot
+
+            # 3. Pull latest changes
+            echo "🔄 Pulling latest code..."
             git pull origin main
+
+            # 4. Ensure Database Files Exist (Prevent Crash)
+            if [ ! -f "sentJobs.json" ]; then
+              echo "📄 Creating sentJobs.json..."
+              echo "{}" > sentJobs.json
+            fi
             
-            # Build and restart the container
-            docker build -t job-updates-bot .
-            
-            # Stop old container if running
-            docker stop job-bot-instance || true
-            docker rm job-bot-instance || true
-            
-            # Run the container
-            # We mount the JSON files to the host so data is NOT lost on restart
-            docker run -d \
+            if [ ! -f "subscribers.json" ]; then
+              echo "📄 Creating subscribers.json..."
+              echo "[]" > subscribers.json
+            fi
+
+            # 5. Build and Run Docker
+            echo "🐳 Building Docker Image..."
+            sudo docker build -t job-updates-bot .
+
+            echo "🛑 Stopping old container..."
+            sudo docker stop job-bot-instance || true
+            sudo docker rm job-bot-instance || true
+
+            echo "🚀 Starting new container..."
+            sudo docker run -d \
               --name job-bot-instance \
               --restart always \
               -v $(pwd)/sentJobs.json:/usr/src/app/sentJobs.json \
