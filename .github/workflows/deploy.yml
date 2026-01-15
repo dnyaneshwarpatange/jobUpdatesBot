@@ -1,34 +1,43 @@
-trigger:
-- main  # Trigger pipeline on changes to main branch
+name: CI/CD Pipeline
 
-pool:
-  vmImage: 'ubuntu-latest'  # Use Microsoft-hosted agent
+on:
+  push:
+    branches: [ main ]
 
-variables:
-  VM_TARGET_FOLDER: '/home/azureuser/app'  # Target directory on VM
-  SSH_ENDPOINT: 'AzureVM_SSH_Connection'   # Name of your SSH service connection
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-steps:
-- checkout: self  # Checkout source code to agent
-
-- task: CopyFilesOverSSH@0
-  displayName: 'Copy files to Azure VM'
-  inputs:
-    sshEndpoint: $(SSH_ENDPOINT)
-    sourceFolder: '$(System.DefaultWorkingDirectory)'
-    contents: '**'  # Copy all files
-    targetFolder: $(VM_TARGET_FOLDER)
-    readyTimeout: 20000  # 20 second timeout
-
-- task: SSH@0
-  displayName: 'Install dependencies and start application'
-  inputs:
-    sshEndpoint: $(SSH_ENDPOINT)
-    runOptions: commands
-    commands: |
-      cd $(VM_TARGET_FOLDER)
-      npm install --production
-      pm2 start index.js --name "my-app"
-      pm2 save
-      pm2 startup
-    failOnStdErr: false
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Navigate to app directory (create if not exists)
+            mkdir -p ~/jobUpdatesBot
+            cd ~/jobUpdatesBot
+            
+            # Pull latest changes (assuming you've cloned the repo there)
+            git pull origin main
+            
+            # Build and restart the container
+            docker build -t job-updates-bot .
+            
+            # Stop old container if running
+            docker stop job-bot-instance || true
+            docker rm job-bot-instance || true
+            
+            # Run the container
+            # We mount the JSON files to the host so data is NOT lost on restart
+            docker run -d \
+              --name job-bot-instance \
+              --restart always \
+              -v $(pwd)/sentJobs.json:/usr/src/app/sentJobs.json \
+              -v $(pwd)/subscribers.json:/usr/src/app/subscribers.json \
+              --env TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }} \
+              job-updates-bot
