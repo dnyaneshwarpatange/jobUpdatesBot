@@ -47,7 +47,6 @@ async function scrapeJobDetails(url) {
         const value = $element.contents().not(strong).text().trim();
         if (key && value) jobDetails[key] = value;
       }
-      
     });
 
     jobDetails['Apply Link'] = $('p').filter((i, el) =>
@@ -60,7 +59,7 @@ async function scrapeJobDetails(url) {
 
     return jobDetails;
   } catch (error) {
-    console.error('Error scraping job details:', error);
+    console.error(`Error scraping job details for ${url}:`, error.message);
     return null;
   }
 }
@@ -85,6 +84,42 @@ async function scrapeLatestJob() {
   }
 }
 
+// NEW: Function to scrape multiple recent jobs
+async function scrapeRecentJobs(limit = 10) {
+  try {
+    const { data } = await axios.get('https://freshershunt.in/off-campus-drive/');
+    const $ = cheerio.load(data);
+    
+    const jobsToScrape = [];
+    
+    // Collect the top 'limit' URLs first
+    $('.entry-title > a').each((i, el) => {
+      if (i < limit) {
+        const title = $(el).text().trim();
+        const rawUrl = $(el).attr('href');
+        const url = normalizeUrl(rawUrl);
+        jobsToScrape.push({ title, url, rawUrl });
+      }
+    });
+
+    const results = [];
+    console.log(`Starting scrape for ${jobsToScrape.length} jobs...`);
+
+    // Process sequentially to be polite to the server and avoid timeouts
+    for (const job of jobsToScrape) {
+      const details = await scrapeJobDetails(job.rawUrl);
+      if (details) {
+        results.push({ title: job.title, url: job.url, details });
+      }
+    }
+    
+    return results;
+  } catch (error) {
+    console.error('Error scraping recent jobs list:', error);
+    return [];
+  }
+}
+
 function formatJobMessage(job) {
   return `🔔 *New Job Alert!* 🔔\n\n` +
     `*${job.title}*\n\n` +
@@ -104,7 +139,7 @@ bot.onText(/\/start/, (msg) => {
   subscribers.add(chatId);
   bot.sendMessage(
     chatId,
-    '🌟 Welcome to Job Alerts Bot! 🌟\n\nWe\'ll send you new off-campus drive updates when new updates available. Use /latest to get the most recent job posting.',
+    '🌟 Welcome to Job Alerts Bot! 🌟\n\nCommands:\n/latest - Get the most recent job\n/thisweek - Get the last 10 jobs',
     { parse_mode: 'Markdown' }
   );
 });
@@ -116,6 +151,25 @@ bot.onText(/\/latest/, async (msg) => {
     bot.sendMessage(chatId, formatJobMessage(job), { parse_mode: 'Markdown', disable_web_page_preview: true });
   } else {
     bot.sendMessage(chatId, 'No job postings found at the moment.');
+  }
+});
+
+// NEW: /thisweek command handler
+bot.onText(/\/thisweek/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  // Send a loading message so the user knows it's working
+  bot.sendMessage(chatId, '🔍 Fetching the last 10 jobs. This may take a few seconds...');
+
+  const jobs = await scrapeRecentJobs(10);
+
+  if (jobs.length > 0) {
+    for (const job of jobs) {
+      await bot.sendMessage(chatId, formatJobMessage(job), { parse_mode: 'Markdown', disable_web_page_preview: true });
+    }
+    bot.sendMessage(chatId, '✅ Done! Here are the last 10 jobs.');
+  } else {
+    bot.sendMessage(chatId, '⚠️ Could not fetch jobs at this time. Please try again later.');
   }
 });
 
@@ -135,7 +189,7 @@ cron.schedule('*/30 * * * *', async () => {
         .catch(error => error.response?.statusCode === 403 && subscribers.delete(chatId));
     });
 
-    // ✅ Also post to the channel
+    // Post to the channel
     bot.sendMessage(channelId, message, { parse_mode: 'Markdown', disable_web_page_preview: true });
 
   } catch (error) {
