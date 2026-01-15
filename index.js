@@ -47,6 +47,7 @@ async function scrapeJobDetails(url) {
         const value = $element.contents().not(strong).text().trim();
         if (key && value) jobDetails[key] = value;
       }
+      
     });
 
     jobDetails['Apply Link'] = $('p').filter((i, el) =>
