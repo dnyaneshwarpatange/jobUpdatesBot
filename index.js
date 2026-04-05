@@ -39,21 +39,43 @@ async function scrapeJobDetails(url) {
     const $ = cheerio.load(data);
     const jobDetails = {};
 
-    $('p').each((index, element) => {
-      const $element = $(element);
-      const strong = $element.find('strong');
-      if (strong.length) {
-        const key = strong.text().trim().replace(':', '').replace(/\s+/g, ' ');
-        const value = $element.contents().not(strong).text().trim();
-        if (key && value) jobDetails[key] = value;
+    // 1. Try parsing the new Table layout
+    $('table tbody tr').each((i, el) => {
+      const key = $(el).find('td').first().text().trim().replace(/:/g, '');
+      const value = $(el).find('td').last().text().trim();
+      if (key && value && key !== value) {
+        jobDetails[key] = value;
       }
     });
 
-    jobDetails['Apply Link'] = $('p').filter((i, el) =>
-      $(el).find('strong').first().text().trim().toLowerCase().includes('apply link')
-    ).find('a').attr('href');
+    // 2. Fallback to old Paragraph layout if table is empty (for older posts)
+    if (Object.keys(jobDetails).length === 0) {
+      $('p').each((index, element) => {
+        const $element = $(element);
+        const strong = $element.find('strong');
+        if (strong.length) {
+          const key = strong.text().trim().replace(':', '').replace(/\s+/g, ' ');
+          const value = $element.contents().not(strong).text().trim();
+          if (key && value) jobDetails[key] = value;
+        }
+      });
+    }
 
-    jobDetails['Company Name'] = $('p').filter((i, el) =>
+    // 3. Scrape the "Apply Now" link (Checking both new button format and old text format)
+    let applyLink = $('a').filter((i, el) => {
+      const text = $(el).text().toLowerCase();
+      return text.includes('apply now') || text.includes('apply here');
+    }).first().attr('href');
+
+    if (!applyLink) {
+      applyLink = $('p').filter((i, el) =>
+        $(el).find('strong').first().text().trim().toLowerCase().includes('apply link')
+      ).find('a').attr('href');
+    }
+    jobDetails['Apply Link'] = applyLink;
+
+    // 4. Scrape Company Website if available (mostly for older layout)
+    jobDetails['Company Website'] = $('p').filter((i, el) =>
       $(el).find('strong').first().text().trim().toLowerCase().includes('company website')
     ).find('a').text().trim();
 
@@ -66,7 +88,7 @@ async function scrapeJobDetails(url) {
 
 async function scrapeLatestJob() {
   try {
-    const { data } = await axios.get('https://freshershunt.in/off-campus-drive/');
+    const { data } = await axios.get('https://freshershunt.in/off-campus-drive-jobs/off-campus-drive/');
     const $ = cheerio.load(data);
 
     const jobElement = $('.entry-title > a').first();
@@ -84,10 +106,9 @@ async function scrapeLatestJob() {
   }
 }
 
-// NEW: Function to scrape multiple recent jobs
 async function scrapeRecentJobs(limit = 10) {
   try {
-    const { data } = await axios.get('https://freshershunt.in/off-campus-drive/');
+    const { data } = await axios.get('https://freshershunt.in/off-campus-drive-jobs/off-campus-drive/');
     const $ = cheerio.load(data);
     
     const jobsToScrape = [];
@@ -121,17 +142,18 @@ async function scrapeRecentJobs(limit = 10) {
 }
 
 function formatJobMessage(job) {
+  // Updated to match the new keys pulled from the HTML table (Role, Location, Eligibility, etc.)
   return `🔔 *New Job Alert!* 🔔\n\n` +
     `*${job.title}*\n\n` +
     `🏢 *Company:* ${job.details['Company'] || job.details['Company Name'] || 'Not specified'}\n` +
-    `🎯 *Role:* ${job.details['Job Role'] || 'Not specified'}\n` +
-    `📍 *Location:* ${job.details['Job Location'] || 'Multiple Locations'}\n` +
-    `🎓 *Qualifications:* ${job.details['Qualifications'] || 'Any Graduate'}\n\n` +
+    `🎯 *Role:* ${job.details['Role'] || job.details['Job Role'] || 'Not specified'}\n` +
+    `📍 *Location:* ${job.details['Location'] || job.details['Job Location'] || 'Multiple Locations'}\n` +
+    `🎓 *Eligibility:* ${job.details['Eligibility'] || job.details['Qualifications'] || 'Any Graduate'}\n\n` +
     `📝 *Key Details:*\n` +
     `• Batch: ${job.details['Batch'] || 'Not specified'}\n` +
     `• Experience: ${job.details['Experience'] || 'Freshers'}\n` +
-    `• Salary: ${job.details['Salary'] || 'Competitive'}\n\n` +
-    `🔗 *Apply Here:* [Click to Apply](${job.details['Apply Link']})\n`;
+    `• Salary: ${job.details['Salary'] || 'Not disclosed'}\n\n` +
+    `🔗 *Apply Here:* [Click to Apply](${job.details['Apply Link'] || job.url})\n`;
 }
 
 bot.onText(/\/start/, (msg) => {
@@ -154,7 +176,6 @@ bot.onText(/\/latest/, async (msg) => {
   }
 });
 
-// NEW: /thisweek command handler
 bot.onText(/\/thisweek/, async (msg) => {
   const chatId = msg.chat.id;
   
